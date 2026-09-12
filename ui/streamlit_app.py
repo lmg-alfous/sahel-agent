@@ -184,6 +184,41 @@ def _why_reasons(risk: dict, max_n: int = 4) -> list[str]:
     return out
 
 
+def _result_text(text: str) -> str:
+    """Translate deterministic risk reasons shown in the farmer-facing summary."""
+    if lang != "fr":
+        return text
+    translations = {
+        "soil moisture critically low": "humidité du sol extrêmement faible",
+        "soil moisture low": "humidité du sol faible",
+        "no recent rainfall recorded": "aucune pluie récente enregistrée",
+        "low air humidity raises water demand": "la faible humidité de l'air augmente les besoins en eau",
+        "flowering stage is water-sensitive": "le stade de floraison est sensible au manque d'eau",
+        "fruiting stage is water-sensitive": "le stade de fructification est sensible au manque d'eau",
+        "temperature at/above severe-heat threshold": "température au niveau ou au-dessus du seuil de forte chaleur",
+        "temperature in heat-stress range": "température dans la plage de stress thermique",
+        "temperature in cold-stress range": "température dans la plage de stress lié au froid",
+        "flowering is heat-sensitive": "la floraison est sensible à la chaleur",
+        "high humidity is disease-favourable": "une humidité élevée favorise les maladies",
+        "very low humidity stresses foliage": "une humidité très faible stresse le feuillage",
+        "heavy rainfall — waterlogging / runoff risk": "fortes pluies — risque d'engorgement ou de ruissellement",
+        "soil near waterlogging": "sol proche de l'engorgement",
+        "image shows possible water-stress signs": "l'image montre de possibles signes de stress hydrique",
+        "image shows possible heat/scorch signs": "l'image montre de possibles signes de stress thermique ou de brûlure",
+        "image flags a possible stress sign": "l'image signale un possible signe de stress",
+        "no sub-score reached the 'moderate' band": "aucun sous-score n'a atteint le niveau modéré",
+    }
+    if text in translations:
+        return translations[text]
+    if text.startswith("forecast rain probability low "):
+        return text.replace("forecast rain probability low", "probabilité de pluie prévue faible")
+    if text.startswith("weather temperature also elevated "):
+        return text.replace("weather temperature also elevated", "température météo également élevée")
+    if text.startswith("image flags ") and text.endswith(" possible stress signs"):
+        return text.replace("image flags", "l'image signale").replace("possible stress signs", "possibles signes de stress")
+    return text
+
+
 def _evidence_domain(url: str) -> str:
     try:
         return urlparse(url).netloc.replace("www.", "") or url
@@ -367,6 +402,7 @@ if analyze:
         ),
         location=Location(label=(loc_label.strip()[:120] or None), latitude=lat, longitude=lon),
         scenario_id=loaded.get("id") if loaded else None,
+        language=lang,
     )
     with right:
         st.markdown(f"### {t('agent_activity', lang)}")
@@ -402,7 +438,7 @@ if result is not None:
         f"""<div class="risk-hero">
             <div class="risk-eyebrow">{t('risk_hero_label', lang)}</div>
             <span class="risk-badge-big {combined_level}">{t(f'badge_{combined_level}', lang) if f'badge_{combined_level}' in _BADGE_KEYS else combined_level.upper()}</span>
-            <div class="risk-situation">{result.situation_line()}</div>
+            <div class="risk-situation">{result.situation_line(lang)}</div>
             <div class="risk-driver">{driver_line}</div>
         </div>""",
         unsafe_allow_html=True,
@@ -424,7 +460,7 @@ if result is not None:
     if reasons:
         st.markdown(f"#### {t('why_header', lang)}")
         for r in reasons:
-            st.markdown(f"- {r}")
+            st.markdown(f"- {_result_text(r)}")
 
     # --- 4. Recommended actions ----------------------------------------------- #
     actions = rec.get("recommended_actions", [])

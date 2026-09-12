@@ -24,6 +24,15 @@ def test_recommendation_high_priority_has_actions():
     assert any("irrigation" in a.lower() for a in out["recommended_actions"])
 
 
+def test_french_recommendation_is_generated_in_french():
+    out = synthesize(RecommendationInput(
+        risk=_risk("high"), growth_stage="flowering", modalities=["sensors"], language="fr"
+    ))
+    assert "risque environnemental combiné" in out["main_finding"].lower()
+    assert any("irrigation" in action.lower() for action in out["recommended_actions"])
+    assert any("aide à la décision" in warning.lower() for warning in out["warnings"])
+
+
 def test_recommendation_always_has_warning_and_limitations():
     out = synthesize(RecommendationInput(risk=_risk("low"), modalities=[]))
     assert any("decision support" in w.lower() or "not agronomic" in w.lower() for w in out["warnings"])

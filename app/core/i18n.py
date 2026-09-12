@@ -1,10 +1,9 @@
 """Minimal UI localisation — English / French / Bambara.
 
 Scope, honestly: this translates the static navigation chrome (title, form
-labels, buttons, tab names, badges). It does NOT translate the agent's
-generated findings (risk narrative, recommendations) — those are produced by
-the deterministic template / LLM in English only; translating them would
-require localising the synthesis layer itself, out of scope here.
+labels, buttons, tab names, badges). The farmer-facing result summary is also
+generated in French when French or Bambara is selected. Technical details and
+some raw provider evidence remain in their source language.
 
 Bambara coverage is partial and best-effort, not native-reviewed: only
 core, well-attested farming vocabulary is translated. Any key without a

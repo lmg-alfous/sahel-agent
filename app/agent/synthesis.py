@@ -58,4 +58,5 @@ def recommendation_input_from_records(agent_input: AgentInput, records: Dict[str
         "evidence": out("search_web"),
         "growth_stage": agent_input.sensors.growth_stage.value,
         "modalities": agent_input.available_modalities(),
+        "language": agent_input.language,
     }

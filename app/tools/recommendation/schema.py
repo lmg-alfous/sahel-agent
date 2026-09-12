@@ -13,6 +13,7 @@ class RecommendationInput(BaseModel):
     evidence: Dict[str, Any] | None = None      # search_web output, when risk warranted a lookup
     growth_stage: str = "unknown"
     modalities: List[str] = Field(default_factory=list)
+    language: str = "en"
 
 
 class RecommendationOutput(BaseModel):

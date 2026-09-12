@@ -22,6 +22,11 @@ _SYSTEM = (
     "validated agronomic advice."
 )
 
+_LANGUAGE_INSTRUCTIONS = {
+    "fr": " Write every user-facing string value in French.",
+    "bm": " Write every user-facing string value in French; Bambara is not yet reliably supported.",
+}
+
 
 class LLMRecommendationProvider(BaseProvider):
     """Real synthesis via the configured LLM, grounded on structured inputs.
@@ -44,7 +49,7 @@ class LLMRecommendationProvider(BaseProvider):
 
         user = "STRUCTURED INPUTS:\n" + json.dumps(payload.model_dump(), default=str)[:6000]
         try:
-            resp = client.complete(_SYSTEM, user, max_tokens=900)
+            resp = client.complete(_SYSTEM + _LANGUAGE_INSTRUCTIONS.get(payload.language, ""), user, max_tokens=900)
         except Exception as exc:  # noqa: BLE001
             raise ProviderError(f"llm recommendation call failed: {exc}") from exc
 

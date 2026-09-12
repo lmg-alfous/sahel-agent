@@ -81,6 +81,7 @@ class AgentInput(BaseModel):
     sensors: SensorReadings = Field(default_factory=SensorReadings)
     location: Location = Field(default_factory=Location)
     scenario_id: Optional[str] = None
+    language: str = "en"  # Display language requested by the UI for generated copy.
 
     model_config = {"arbitrary_types_allowed": True}
 
@@ -162,9 +163,14 @@ class AgentResult(BaseModel):
     degraded: bool = False                  # True if a fallback level was needed
     errors: List[str] = Field(default_factory=list)
 
-    def situation_line(self) -> str:
+    def situation_line(self, language: str = "en") -> str:
         risk = (self.observation.risk or {}).get("combined_risk", {})
         level = risk.get("level", "unknown")
+        if language == "fr":
+            if level == "unknown":
+                return "Éléments insuffisants pour estimer le risque environnemental."
+            labels = {"low": "FAIBLE", "moderate": "MODÉRÉ", "high": "ÉLEVÉ"}
+            return f"Risque environnemental global : {labels.get(level, level.upper())}"
         if level == "unknown":
             return "Insufficient evidence to estimate environmental risk"
         return f"Overall environmental risk: {level.upper()}"
