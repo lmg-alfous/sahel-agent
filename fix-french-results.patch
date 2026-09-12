@@ -1,0 +1,336 @@
+From 3e6621bfc181732623622ba5c13f281d7be71d72 Mon Sep 17 00:00:00 2001
+From: EUTG-Bot-Lab <team@eutg-bot-lab.dev>
+Date: Sat, 12 Sep 2026 12:44:08 +0000
+Subject: [PATCH] Fix French analysis results
+
+---
+ app/agent/synthesis.py                        |  1 +
+ app/core/i18n.py                              |  7 ++-
+ app/core/schemas.py                           |  8 +++-
+ app/tools/recommendation/providers/llm.py     |  7 ++-
+ .../recommendation/providers/template.py      | 47 ++++++++++---------
+ app/tools/recommendation/schema.py            |  1 +
+ docs/i18n.md                                  | 13 +++--
+ tests/test_recommendation.py                  |  9 ++++
+ ui/streamlit_app.py                           | 40 +++++++++++++++-
+ 9 files changed, 97 insertions(+), 36 deletions(-)
+
+diff --git a/app/agent/synthesis.py b/app/agent/synthesis.py
+index 8a077a2..b278497 100644
+--- a/app/agent/synthesis.py
++++ b/app/agent/synthesis.py
+@@ -58,4 +58,5 @@ def recommendation_input_from_records(agent_input: AgentInput, records: Dict[str
+         "evidence": out("search_web"),
+         "growth_stage": agent_input.sensors.growth_stage.value,
+         "modalities": agent_input.available_modalities(),
++        "language": agent_input.language,
+     }
+diff --git a/app/core/i18n.py b/app/core/i18n.py
+index 82c3b27..ba82a58 100644
+--- a/app/core/i18n.py
++++ b/app/core/i18n.py
+@@ -1,10 +1,9 @@
+ """Minimal UI localisation — English / French / Bambara.
+ 
+ Scope, honestly: this translates the static navigation chrome (title, form
+-labels, buttons, tab names, badges). It does NOT translate the agent's
+-generated findings (risk narrative, recommendations) — those are produced by
+-the deterministic template / LLM in English only; translating them would
+-require localising the synthesis layer itself, out of scope here.
++labels, buttons, tab names, badges). The farmer-facing result summary is also
++generated in French when French or Bambara is selected. Technical details and
++some raw provider evidence remain in their source language.
+ 
+ Bambara coverage is partial and best-effort, not native-reviewed: only
+ core, well-attested farming vocabulary is translated. Any key without a
+diff --git a/app/core/schemas.py b/app/core/schemas.py
+index 5c1110a..cab2386 100644
+--- a/app/core/schemas.py
++++ b/app/core/schemas.py
+@@ -81,6 +81,7 @@ class AgentInput(BaseModel):
+     sensors: SensorReadings = Field(default_factory=SensorReadings)
+     location: Location = Field(default_factory=Location)
+     scenario_id: Optional[str] = None
++    language: str = "en"  # Display language requested by the UI for generated copy.
+ 
+     model_config = {"arbitrary_types_allowed": True}
+ 
+@@ -162,9 +163,14 @@ class AgentResult(BaseModel):
+     degraded: bool = False                  # True if a fallback level was needed
+     errors: List[str] = Field(default_factory=list)
+ 
+-    def situation_line(self) -> str:
++    def situation_line(self, language: str = "en") -> str:
+         risk = (self.observation.risk or {}).get("combined_risk", {})
+         level = risk.get("level", "unknown")
++        if language == "fr":
++            if level == "unknown":
++                return "Éléments insuffisants pour estimer le risque environnemental."
++            labels = {"low": "FAIBLE", "moderate": "MODÉRÉ", "high": "ÉLEVÉ"}
++            return f"Risque environnemental global : {labels.get(level, level.upper())}"
+         if level == "unknown":
+             return "Insufficient evidence to estimate environmental risk"
+         return f"Overall environmental risk: {level.upper()}"
+diff --git a/app/tools/recommendation/providers/llm.py b/app/tools/recommendation/providers/llm.py
+index a1effae..75d4697 100644
+--- a/app/tools/recommendation/providers/llm.py
++++ b/app/tools/recommendation/providers/llm.py
+@@ -22,6 +22,11 @@ _SYSTEM = (
+     "validated agronomic advice."
+ )
+ 
++_LANGUAGE_INSTRUCTIONS = {
++    "fr": " Write every user-facing string value in French.",
++    "bm": " Write every user-facing string value in French; Bambara is not yet reliably supported.",
++}
++
+ 
+ class LLMRecommendationProvider(BaseProvider):
+     """Real synthesis via the configured LLM, grounded on structured inputs.
+@@ -44,7 +49,7 @@ class LLMRecommendationProvider(BaseProvider):
+ 
+         user = "STRUCTURED INPUTS:\n" + json.dumps(payload.model_dump(), default=str)[:6000]
+         try:
+-            resp = client.complete(_SYSTEM, user, max_tokens=900)
++            resp = client.complete(_SYSTEM + _LANGUAGE_INSTRUCTIONS.get(payload.language, ""), user, max_tokens=900)
+         except Exception as exc:  # noqa: BLE001
+             raise ProviderError(f"llm recommendation call failed: {exc}") from exc
+ 
+diff --git a/app/tools/recommendation/providers/template.py b/app/tools/recommendation/providers/template.py
+index fe41923..895378c 100644
+--- a/app/tools/recommendation/providers/template.py
++++ b/app/tools/recommendation/providers/template.py
+@@ -32,26 +32,25 @@ def synthesize(payload: RecommendationInput) -> Dict[str, Any]:
+     monitoring: List[str] = []
+     warnings: List[str] = []
+ 
++    french = payload.language in {"fr", "bm"}
+     if water == "high":
+         actions.append(
+-            "Prioritise targeted irrigation within the next 24h; verify soil moisture "
+-            "with a probe at root depth before and after."
++            "Priorisez une irrigation ciblée dans les 24 h ; vérifiez l'humidité du sol "
++            "avec une sonde à profondeur de racines avant et après."
++            if french else "Prioritise targeted irrigation within the next 24h; verify soil moisture with a probe at root depth before and after."
+         )
+     elif water == "moderate":
+-        actions.append("Plan supplemental irrigation in the next 1-2 days if no rain is forecast.")
++        actions.append("Prévoyez une irrigation complémentaire dans les 1 à 2 prochains jours si aucune pluie n'est prévue." if french else "Plan supplemental irrigation in the next 1-2 days if no rain is forecast.")
+ 
+     if heat == "high":
+-        actions.append(
+-            "Reduce midday heat load where feasible (irrigation timing, shading/mulch); "
+-            "avoid operations that add plant stress during peak heat."
+-        )
++        actions.append("Réduisez la charge de chaleur à midi si possible (horaire d'irrigation, ombrage ou paillage) ; évitez les opérations qui ajoutent du stress pendant les pics de chaleur." if french else "Reduce midday heat load where feasible (irrigation timing, shading/mulch); avoid operations that add plant stress during peak heat.")
+     elif heat == "moderate":
+-        actions.append("Schedule field work for early morning/evening to limit heat exposure.")
++        actions.append("Planifiez le travail au champ tôt le matin ou le soir pour limiter l'exposition à la chaleur." if french else "Schedule field work for early morning/evening to limit heat exposure.")
+ 
+     if env == "high":
+-        actions.append("Inspect for disease pressure and drainage issues; adjust canopy management as needed.")
++        actions.append("Inspectez la pression des maladies et les problèmes de drainage ; ajustez la gestion du couvert végétal si nécessaire." if french else "Inspect for disease pressure and drainage issues; adjust canopy management as needed.")
+     elif env == "moderate":
+-        actions.append("Increase scouting frequency for early disease or nutrient symptoms.")
++        actions.append("Augmentez la fréquence des observations pour repérer tôt les symptômes de maladie ou de carence." if french else "Increase scouting frequency for early disease or nutrient symptoms.")
+ 
+     # Vision-driven note.
+     vsigns = (payload.vision or {}).get("possible_signs") or []
+@@ -81,7 +80,7 @@ def synthesize(payload: RecommendationInput) -> Dict[str, Any]:
+         warnings.append(f"Note (conflicting signals): {div}")
+ 
+     if not actions:
+-        actions.append("No urgent intervention indicated by the prototype heuristics; maintain the normal plan.")
++        actions.append("Les heuristiques du prototype n'indiquent pas d'intervention urgente ; maintenez le plan habituel." if french else "No urgent intervention indicated by the prototype heuristics; maintain the normal plan.")
+     if not monitoring:
+         monitoring.append("Continue routine monitoring of soil moisture, temperature and canopy condition.")
+ 
+@@ -97,10 +96,7 @@ def synthesize(payload: RecommendationInput) -> Dict[str, Any]:
+     confidence = float(risk.get("confidence", 0.4))
+     main_finding = _main_finding(combined, water, heat, env, payload)
+     if combined == "unknown":
+-        main_finding = (
+-            "Insufficient evidence to estimate environmental risk: no sensor, image "
+-            "or weather data was usable. Provide at least sensor readings or an image."
+-        )
++        main_finding = ("Éléments insuffisants pour estimer le risque environnemental : aucune donnée de capteur, image ou donnée météo utilisable. Fournissez au moins des relevés de capteurs ou une image." if french else "Insufficient evidence to estimate environmental risk: no sensor, image or weather data was usable. Provide at least sensor readings or an image.")
+     elif xc_div:
+         main_finding = (
+             main_finding
+@@ -108,10 +104,7 @@ def synthesize(payload: RecommendationInput) -> Dict[str, Any]:
+             + ") — treat this result as provisional and confirm on site."
+         )
+ 
+-    warnings.append(
+-        "This is decision SUPPORT, not agronomic advice. Figures are prototype "
+-        "indicators and require confirmation by a qualified person on site."
+-    )
++    warnings.append("Ceci est une aide à la décision, pas un conseil agronomique. Les chiffres sont des indicateurs de prototype et doivent être confirmés sur place par une personne qualifiée." if french else "This is decision SUPPORT, not agronomic advice. Figures are prototype indicators and require confirmation by a qualified person on site.")
+ 
+     limitations = [
+         "Heuristic rules, not a validated model; thresholds need local calibration.",
+@@ -151,21 +144,29 @@ def synthesize(payload: RecommendationInput) -> Dict[str, Any]:
+ 
+ 
+ def _main_finding(combined: str, water: str, heat: str, env: str, payload: RecommendationInput) -> str:
++    french = payload.language in {"fr", "bm"}
+     if combined == "unknown":
+         return "Insufficient data to estimate combined environmental risk with confidence."
+     drivers = []
+     if water in {"moderate", "high"}:
+-        drivers.append(f"water stress ({water})")
++        drivers.append(f"stress hydrique ({_fr_level(water)})" if french else f"water stress ({water})")
+     if heat in {"moderate", "high"}:
+-        drivers.append(f"heat stress ({heat})")
++        drivers.append(f"stress thermique ({_fr_level(heat)})" if french else f"heat stress ({heat})")
+     if env in {"moderate", "high"}:
+-        drivers.append(f"environmental risk ({env})")
+-    driver_txt = ", ".join(drivers) if drivers else "no single dominant driver"
++        drivers.append(f"risque environnemental ({_fr_level(env)})" if french else f"environmental risk ({env})")
++    driver_txt = ", ".join(drivers) if drivers else ("aucun facteur dominant unique" if french else "no single dominant driver")
+     stage = payload.growth_stage
++    if french:
++        stage_txt = f" au stade {stage}" if stage and stage != "unknown" else ""
++        return f"Le risque environnemental combiné est {_fr_level(combined)}{stage_txt} ; principaux facteurs : {driver_txt}."
+     stage_txt = f" at the {stage} stage" if stage and stage != "unknown" else ""
+     return f"Combined environmental risk is {combined}{stage_txt}; main contributor(s): {driver_txt}."
+ 
+ 
++def _fr_level(level: str) -> str:
++    return {"low": "faible", "moderate": "modéré", "medium": "moyen", "high": "élevé", "unknown": "inconnu"}.get(level, level)
++
++
+ class TemplateRecommendationProvider(BaseProvider):
+     name = "template"
+     status = MaturityStatus.IMPLEMENTED
+diff --git a/app/tools/recommendation/schema.py b/app/tools/recommendation/schema.py
+index c8811b0..5e900b1 100644
+--- a/app/tools/recommendation/schema.py
++++ b/app/tools/recommendation/schema.py
+@@ -13,6 +13,7 @@ class RecommendationInput(BaseModel):
+     evidence: Dict[str, Any] | None = None      # search_web output, when risk warranted a lookup
+     growth_stage: str = "unknown"
+     modalities: List[str] = Field(default_factory=list)
++    language: str = "en"
+ 
+ 
+ class RecommendationOutput(BaseModel):
+diff --git a/docs/i18n.md b/docs/i18n.md
+index cd55db8..97c176d 100644
+--- a/docs/i18n.md
++++ b/docs/i18n.md
+@@ -9,14 +9,17 @@ switcher is a genuine fit-to-environment feature, not decoration.
+ 
+ ## Scope — read this before assuming "the app is translated"
+ 
+-`app/core/i18n.py` translates the **static UI chrome only**: title, tagline,
+-form labels, buttons, tab names, section headers, risk-level badges.
++`app/core/i18n.py` translates the **static UI chrome**: title, tagline, form
++labels, buttons, tab names, section headers, and risk-level badges. The
++analysis now passes the selected language into the recommendation synthesis:
++the French result summary, recommended actions, and safety warning are produced
++in French in both offline and live-LLM modes.
+ 
+ It does **not** translate:
+ 
+-- the agent's generated findings (situation line, recommendations, warnings,
+-  limitations) — produced in English by the deterministic template / LLM;
+-  localising the synthesis layer itself is future work;
++- technical/raw diagnostic detail (provider names, trace events, sensor
++  anomalies, source excerpts, and some limitations) — these retain their
++  source language so the evidence is not distorted;
+ - technical runtime labels in the sidebar (`Environment`, `LLM`, provider
+   names) — kept in English deliberately, they describe configuration, not
+   the farmer-facing experience.
+diff --git a/tests/test_recommendation.py b/tests/test_recommendation.py
+index 8cacb15..76fce79 100644
+--- a/tests/test_recommendation.py
++++ b/tests/test_recommendation.py
+@@ -24,6 +24,15 @@ def test_recommendation_high_priority_has_actions():
+     assert any("irrigation" in a.lower() for a in out["recommended_actions"])
+ 
+ 
++def test_french_recommendation_is_generated_in_french():
++    out = synthesize(RecommendationInput(
++        risk=_risk("high"), growth_stage="flowering", modalities=["sensors"], language="fr"
++    ))
++    assert "risque environnemental combiné" in out["main_finding"].lower()
++    assert any("irrigation" in action.lower() for action in out["recommended_actions"])
++    assert any("aide à la décision" in warning.lower() for warning in out["warnings"])
++
++
+ def test_recommendation_always_has_warning_and_limitations():
+     out = synthesize(RecommendationInput(risk=_risk("low"), modalities=[]))
+     assert any("decision support" in w.lower() or "not agronomic" in w.lower() for w in out["warnings"])
+diff --git a/ui/streamlit_app.py b/ui/streamlit_app.py
+index f3702b4..8b5175f 100644
+--- a/ui/streamlit_app.py
++++ b/ui/streamlit_app.py
+@@ -184,6 +184,41 @@ def _why_reasons(risk: dict, max_n: int = 4) -> list[str]:
+     return out
+ 
+ 
++def _result_text(text: str) -> str:
++    """Translate deterministic risk reasons shown in the farmer-facing summary."""
++    if lang != "fr":
++        return text
++    translations = {
++        "soil moisture critically low": "humidité du sol extrêmement faible",
++        "soil moisture low": "humidité du sol faible",
++        "no recent rainfall recorded": "aucune pluie récente enregistrée",
++        "low air humidity raises water demand": "la faible humidité de l'air augmente les besoins en eau",
++        "flowering stage is water-sensitive": "le stade de floraison est sensible au manque d'eau",
++        "fruiting stage is water-sensitive": "le stade de fructification est sensible au manque d'eau",
++        "temperature at/above severe-heat threshold": "température au niveau ou au-dessus du seuil de forte chaleur",
++        "temperature in heat-stress range": "température dans la plage de stress thermique",
++        "temperature in cold-stress range": "température dans la plage de stress lié au froid",
++        "flowering is heat-sensitive": "la floraison est sensible à la chaleur",
++        "high humidity is disease-favourable": "une humidité élevée favorise les maladies",
++        "very low humidity stresses foliage": "une humidité très faible stresse le feuillage",
++        "heavy rainfall — waterlogging / runoff risk": "fortes pluies — risque d'engorgement ou de ruissellement",
++        "soil near waterlogging": "sol proche de l'engorgement",
++        "image shows possible water-stress signs": "l'image montre de possibles signes de stress hydrique",
++        "image shows possible heat/scorch signs": "l'image montre de possibles signes de stress thermique ou de brûlure",
++        "image flags a possible stress sign": "l'image signale un possible signe de stress",
++        "no sub-score reached the 'moderate' band": "aucun sous-score n'a atteint le niveau modéré",
++    }
++    if text in translations:
++        return translations[text]
++    if text.startswith("forecast rain probability low "):
++        return text.replace("forecast rain probability low", "probabilité de pluie prévue faible")
++    if text.startswith("weather temperature also elevated "):
++        return text.replace("weather temperature also elevated", "température météo également élevée")
++    if text.startswith("image flags ") and text.endswith(" possible stress signs"):
++        return text.replace("image flags", "l'image signale").replace("possible stress signs", "possibles signes de stress")
++    return text
++
++
+ def _evidence_domain(url: str) -> str:
+     try:
+         return urlparse(url).netloc.replace("www.", "") or url
+@@ -367,6 +402,7 @@ if analyze:
+         ),
+         location=Location(label=(loc_label.strip()[:120] or None), latitude=lat, longitude=lon),
+         scenario_id=loaded.get("id") if loaded else None,
++        language=lang,
+     )
+     with right:
+         st.markdown(f"### {t('agent_activity', lang)}")
+@@ -402,7 +438,7 @@ if result is not None:
+         f"""<div class="risk-hero">
+             <div class="risk-eyebrow">{t('risk_hero_label', lang)}</div>
+             <span class="risk-badge-big {combined_level}">{t(f'badge_{combined_level}', lang) if f'badge_{combined_level}' in _BADGE_KEYS else combined_level.upper()}</span>
+-            <div class="risk-situation">{result.situation_line()}</div>
++            <div class="risk-situation">{result.situation_line(lang)}</div>
+             <div class="risk-driver">{driver_line}</div>
+         </div>""",
+         unsafe_allow_html=True,
+@@ -424,7 +460,7 @@ if result is not None:
+     if reasons:
+         st.markdown(f"#### {t('why_header', lang)}")
+         for r in reasons:
+-            st.markdown(f"- {r}")
++            st.markdown(f"- {_result_text(r)}")
+ 
+     # --- 4. Recommended actions ----------------------------------------------- #
+     actions = rec.get("recommended_actions", [])
